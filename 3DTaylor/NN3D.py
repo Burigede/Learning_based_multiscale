@@ -486,11 +486,11 @@ class DenseNet_tensor(nn.Module):
         return x
 ########### TO CHANGE ######################################
 USE_CUDA = True
-TRAIN_PATH = '~\Taylor3D.mat'
+TRAIN_PATH = 'Taylor3D.mat'
 
-Ntotal     = 35747
-train_size = 4000
-test_start = 30000
+Ntotal     = 18841
+train_size = 18000
+test_start = 18001
 
 N_test = Ntotal-test_start
 
@@ -526,9 +526,9 @@ data_F13  = data_loader.read_field(F13_FIELD).contiguous().view(Ntotal, -1)
 data_F23  = data_loader.read_field(F23_FIELD).contiguous().view(Ntotal, -1)
 data_F33  = data_loader.read_field(F33_FIELD).contiguous().view(Ntotal, -1)
 
-data_F11  = torch.cat((temp+1,data_F11+1),1)
-data_F22  = torch.cat((temp+1,data_F22+1),1)
-data_F33  = torch.cat((temp+1,data_F33+1),1)
+data_F11  = torch.cat((temp+1,data_F11),1)
+data_F22  = torch.cat((temp+1,data_F22),1)
+data_F33  = torch.cat((temp+1,data_F33),1)
 data_F12  = torch.cat((temp,data_F12),1)
 data_F13  = torch.cat((temp,data_F13),1)
 data_F23  = torch.cat((temp,data_F23),1)
@@ -593,7 +593,6 @@ if USE_CUDA:
     x_pca.cuda()
     y_pca.cuda()
 
-
 x_train_enc = x_pca.encode(x_train)
 x_test_enc  = x_pca.encode(x_test)
 
@@ -601,13 +600,13 @@ y_train_enc = y_pca.encode(y_train)
 y_test_enc = y_pca.encode(y_test)
 
 
-net = torch.load('Taylor3Dmax05_nonormal')
+net = DenseNet(NeuroArchi, nn.SELU)
 
 if USE_CUDA:
     net.cuda()
 
 # Number of training epochs
-epochs = 3000
+epochs = 1500
 
 # Optimizer and learning rate scheduler
 optimizer = torch.optim.Adam(net.parameters(), lr=0.0001)
@@ -622,5 +621,91 @@ train_loader = torch.utils.data.DataLoader(torch.utils.data.TensorDataset(x_trai
 x_test_enc = x_test_enc.view(-1, d1*6)
 # Train neural net
 
+train_err = np.zeros((epochs,))
+test_err = np.zeros((epochs,))
+for ep in range(epochs):
+    scheduler.step()
+    train_loss = 0.0
+    for x, y in train_loader:
+        optimizer.zero_grad()
+        x = x.view(-1, d1*6)
+        #loss = F.mse_loss(net(x), y)
+        y_train = y_pca.decode(net(x).view(-1,d2,6))
+        y_true  = y_pca.decode(y)
+        loss = loss_func(y_train,y_true)
+        loss.backward()
+        train_loss = train_loss + loss.item()
+
+        optimizer.step()
+
+    #test_err[ep]  = F.mse_loss(net(x_test_enc), y_test_enc).item()
+    y_test_approx = y_pca.decode(net(x_test_enc).view(-1,d2,6).detach())
+    test_err[ep]  = loss_func(y_test_approx, y_test).item()
+    #train_err[ep] = F.mse_loss(net(x_train_enc), y_train_enc).item()
+    train_err[ep] = train_loss/len(train_loader)
+    print(ep, train_err[ep], test_err[ep])
+    if train_err[ep] <= 0.01:
+        break
+
+
 y_test_approx = y_pca.decode(net(x_test_enc).view(-1,d2,6).detach())
 print('Relative approximation error (NN):\t', loss_func(y_test_approx, y_test).item())
+
+torch.save(net,'Taylor3D')
+
+xpca_W1 = x_pca.W1.detach().cpu().numpy()
+xpca_W2 = x_pca.W2.detach().cpu().numpy()
+xpca_W3 = x_pca.W3.detach().cpu().numpy()
+xpca_W4 = x_pca.W4.detach().cpu().numpy()
+xpca_W5 = x_pca.W5.detach().cpu().numpy()
+xpca_W6 = x_pca.W6.detach().cpu().numpy()
+
+ypca_W1 = y_pca.W1.detach().cpu().numpy()
+ypca_W2 = y_pca.W2.detach().cpu().numpy()
+ypca_W3 = y_pca.W3.detach().cpu().numpy()
+ypca_W4 = y_pca.W4.detach().cpu().numpy()
+ypca_W5 = y_pca.W5.detach().cpu().numpy()
+ypca_W6 = y_pca.W6.detach().cpu().numpy()
+
+
+np.savetxt('xpca_Taylor_W1.txt', xpca_W1.transpose(), delimiter=' ')
+np.savetxt('xpca_Taylor_W2.txt', xpca_W2.transpose(), delimiter=' ')
+np.savetxt('xpca_Taylor_W3.txt', xpca_W3.transpose(), delimiter=' ')
+np.savetxt('xpca_Taylor_W4.txt', xpca_W4.transpose(), delimiter=' ')
+np.savetxt('xpca_Taylor_W5.txt', xpca_W5.transpose(), delimiter=' ')
+np.savetxt('xpca_Taylor_W6.txt', xpca_W6.transpose(), delimiter=' ')
+
+
+np.savetxt('ypca_Taylor_W1.txt', ypca_W1.transpose(), delimiter=' ')
+np.savetxt('ypca_Taylor_W2.txt', ypca_W2.transpose(), delimiter=' ')
+np.savetxt('ypca_Taylor_W3.txt', ypca_W3.transpose(), delimiter=' ')
+np.savetxt('ypca_Taylor_W4.txt', ypca_W4.transpose(), delimiter=' ')
+np.savetxt('ypca_Taylor_W5.txt', ypca_W5.transpose(), delimiter=' ')
+np.savetxt('ypca_Taylor_W6.txt', ypca_W6.transpose(), delimiter=' ')
+
+
+params = net.state_dict()
+layer_1_weight = params['layers.0.weight'].detach().cpu().numpy()
+layer_2_weight = params['layers.2.weight'].detach().cpu().numpy()
+layer_3_weight = params['layers.4.weight'].detach().cpu().numpy()
+layer_4_weight = params['layers.6.weight'].detach().cpu().numpy()
+layer_5_weight = params['layers.8.weight'].detach().cpu().numpy()
+
+np.savetxt('layer_1_Taylor_weight.txt', layer_1_weight.transpose(), delimiter=' ')
+np.savetxt('layer_2_Taylor_weight.txt', layer_2_weight.transpose(), delimiter=' ')
+np.savetxt('layer_3_Taylor_weight.txt', layer_3_weight.transpose(), delimiter=' ')
+np.savetxt('layer_4_Taylor_weight.txt', layer_4_weight.transpose(), delimiter=' ')
+np.savetxt('layer_5_Taylor_weight.txt', layer_5_weight.transpose(), delimiter=' ')
+
+layer_1_bias = params['layers.0.bias'].detach().cpu().numpy()
+layer_2_bias = params['layers.2.bias'].detach().cpu().numpy()
+layer_3_bias = params['layers.4.bias'].detach().cpu().numpy()
+layer_4_bias = params['layers.6.bias'].detach().cpu().numpy()
+layer_5_bias = params['layers.8.bias'].detach().cpu().numpy()
+
+np.savetxt('layer_1_Taylor_bias.txt', layer_1_bias.transpose(), delimiter=' ')
+np.savetxt('layer_2_Taylor_bias.txt', layer_2_bias.transpose(), delimiter=' ')
+np.savetxt('layer_3_Taylor_bias.txt', layer_3_bias.transpose(), delimiter=' ')
+np.savetxt('layer_4_Taylor_bias.txt', layer_4_bias.transpose(), delimiter=' ')
+np.savetxt('layer_5_Taylor_bias.txt', layer_5_bias.transpose(), delimiter=' ')
+
